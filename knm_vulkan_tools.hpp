@@ -203,6 +203,35 @@ namespace vk {
         /// user
         PFN_vkDebugUtilsMessengerCallbackEXT debugCallback = nullptr;
 
+        /// The highest version of Vulkan that the application is designed to use
+#ifdef VK_API_VERSION_1_3
+        uint32_t vulkanVersion = VK_API_VERSION_1_3;
+#elif defined(VK_API_VERSION_1_2)
+        uint32_t vulkanVersion = VK_API_VERSION_1_2;
+#elif defined(VK_API_VERSION_1_1)
+        uint32_t vulkanVersion = VK_API_VERSION_1_1;
+#else
+        uint32_t vulkanVersion = VK_API_VERSION_1_0;
+#endif
+
+#ifdef VK_API_VERSION_1_3
+        /// Vulkan API 1.3 required features
+        VkPhysicalDeviceVulkan13Features features13{};
+#endif
+
+#ifdef VK_API_VERSION_1_2
+        /// Vulkan API 1.2 required features
+        VkPhysicalDeviceVulkan12Features features12{};
+#endif
+
+#ifdef VK_API_VERSION_1_1
+        /// Vulkan API 1.1 required features
+        VkPhysicalDeviceVulkan11Features features11{};
+#endif
+
+        /// Vulkan API 1.0 required features
+        VkPhysicalDeviceFeatures features10{};
+
         // Other settings
         std::string applicationName = "Vulkan demo";    ///< Application name
     };
@@ -1013,12 +1042,47 @@ namespace vk {
         app->framebufferResized = true;
     }
 
+    //-----------------------------------------------------------------------
+
+    bool compareFeatures(
+        void* required, void* supported, size_t size, size_t offset, bool apiVersionSupported
+    )
+    {
+        VkBool32* required_bool = (VkBool32*) (static_cast<uint8_t*>(required) + offset);
+        VkBool32* supported_bool = (VkBool32*) (static_cast<uint8_t*>(supported) + offset);
+        size_t nb = (size - offset) / sizeof(VkBool32);
+
+        for (size_t i = 0; i < nb; ++i)
+        {
+            if (required_bool[i] && (!supported_bool[i] || !apiVersionSupported))
+                return false;
+        }
+
+        return true;
+    }
+
 
     /*************************** CONSTRUCTION / DESTRUCTION *****************************/
 
     Application::Application()
     {
         config.debugCallback = debugCallback;
+
+#ifdef VK_API_VERSION_1_3
+        config.features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        config.features12.pNext = &config.features13;
+#endif
+
+#ifdef VK_API_VERSION_1_2
+        config.features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        config.features11.pNext = &config.features12;
+#endif
+
+#ifdef VK_API_VERSION_1_1
+        config.features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+#endif
+
+        config.features10.samplerAnisotropy = VK_TRUE;
     }
 
     //-----------------------------------------------------------------------
@@ -1730,7 +1794,7 @@ namespace vk {
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
+        appInfo.apiVersion = config.vulkanVersion;
 
         // Fill in a struct with sufficient information for creating an instance
         VkInstanceCreateInfo createInfo{};
@@ -1883,12 +1947,107 @@ namespace vk {
                                 !swapChainSupport.presentationModes.empty();
         }
 
-        // Retrieve the features supported by the device
-        VkPhysicalDeviceFeatures supportedFeatures;
-        vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
+        // First check to dismiss inadequate devices
+        if (!indices.isComplete() || !extensionsSupported || !swapChainAdequate)
+            return false;
 
-        return indices.isComplete() && extensionsSupported && swapChainAdequate &&
-               supportedFeatures.samplerAnisotropy;
+        // Check that the required (api-specific) features are supported
+        if (config.vulkanVersion == VK_API_VERSION_1_0)
+        {
+            // Retrieve the features supported by the device
+            VkPhysicalDeviceFeatures supportedFeatures;
+            vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
+
+            // Check if all the required features are there
+            return compareFeatures(
+                (void*) &config.features10, (void*) &supportedFeatures,
+                sizeof(VkPhysicalDeviceFeatures), 0, true
+            );
+        }
+        else
+        {
+            // Retrieve the properties of the device
+            VkPhysicalDeviceProperties physicalDeviceProperties;
+            vkGetPhysicalDeviceProperties(device, &physicalDeviceProperties);
+
+            // Retrieve the features supported by the device
+            VkPhysicalDeviceFeatures2 supportedFeatures{};
+            supportedFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+#ifdef VK_API_VERSION_1_1
+            VkPhysicalDeviceVulkan11Features features11{};
+            features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+            supportedFeatures.pNext = &features11;
+#endif
+
+#ifdef VK_API_VERSION_1_2
+            VkPhysicalDeviceVulkan12Features features12{};
+            features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+            features11.pNext = &features12;
+#endif
+
+#ifdef VK_API_VERSION_1_3
+            VkPhysicalDeviceVulkan13Features features13{};
+            features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+            features12.pNext = &features13;
+#endif
+
+            vkGetPhysicalDeviceFeatures2(device, &supportedFeatures);
+
+            // Check if all the required 1.0 features are there
+            if (!compareFeatures(
+                    (void*) &config.features10,
+                    (void*) &supportedFeatures.features,
+                    sizeof(VkPhysicalDeviceFeatures), 0, true
+            ))
+            {
+                return false;
+            }
+
+#ifdef VK_API_VERSION_1_1
+            // Check if all the required 1.1 features are there
+            if (!compareFeatures(
+                    (void*) &config.features11,
+                    (void*) &features11,
+                    sizeof(VkPhysicalDeviceVulkan11Features),
+                    offsetof(VkPhysicalDeviceVulkan11Features, storageBuffer16BitAccess),
+                    physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_1
+            ))
+            {
+                return false;
+            }
+#endif
+
+#ifdef VK_API_VERSION_1_2
+            // Check if all the required 1.2 features are there
+            if (!compareFeatures(
+                    (void*) &config.features12,
+                    (void*) &features12,
+                    sizeof(VkPhysicalDeviceVulkan12Features),
+                    offsetof(VkPhysicalDeviceVulkan12Features, samplerMirrorClampToEdge),
+                    physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_2
+            ))
+            {
+                return false;
+            }
+#endif
+
+#ifdef VK_API_VERSION_1_3
+            // Check if all the required 1.3 features are there
+            if (!compareFeatures(
+                    (void*) &config.features13,
+                    (void*) &features13,
+                    sizeof(VkPhysicalDeviceVulkan13Features),
+                    offsetof(VkPhysicalDeviceVulkan13Features, robustImageAccess),
+                    physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_3
+            ))
+            {
+                return false;
+            }
+#endif
+        }
+
+        return true;
     }
 
     //-----------------------------------------------------------------------
@@ -2027,10 +2186,6 @@ namespace vk {
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        // Fill a struct to specify the set of device features that we'll be using
-        VkPhysicalDeviceFeatures deviceFeatures{};
-        deviceFeatures.samplerAnisotropy = VK_TRUE;
-
         // Fill a struct to create the logical device, using the above structs
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -2038,7 +2193,16 @@ namespace vk {
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pEnabledFeatures = &deviceFeatures;
+#ifdef VK_API_VERSION_1_1
+        VkPhysicalDeviceFeatures2 enabledFeatures{};
+        enabledFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        enabledFeatures.pNext = &config.features11;
+        memcpy(&enabledFeatures.features, &config.features10, sizeof(VkPhysicalDeviceFeatures));
+
+        createInfo.pNext = &enabledFeatures;
+#else
+        createInfo.pEnabledFeatures = &config.features10;
+#endif
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
         createInfo.ppEnabledExtensionNames = requiredExtensions.data();
