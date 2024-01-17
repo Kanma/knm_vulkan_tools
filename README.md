@@ -1,5 +1,7 @@
 # knm::vulkan_tools
 
+[![Documentation Status](https://readthedocs.org/projects/knm-vulkan-tools/badge/?version=latest)](https://knm-vulkan-tools.readthedocs.io/en/latest/?badge=latest)
+
 Helper tools to implement a Vulkan-based C++ application. It handles the following
 Vulkan operations:
 

@@ -1,4 +1,4 @@
-/** knm::vulkan_tools - v1.0.0 - MIT License
+/** knm::vulkan_tools - v1.1.0 - MIT License
 
 DESCRIPTION
 
@@ -167,7 +167,7 @@ LICENSE
 #endif
 
 
-#define KNM_VULKAN_TOOLS_VERSION_MAJOR 0
+#define KNM_VULKAN_TOOLS_VERSION_MAJOR 1
 #define KNM_VULKAN_TOOLS_VERSION_MINOR 1
 #define KNM_VULKAN_TOOLS_VERSION_PATCH 0
 
